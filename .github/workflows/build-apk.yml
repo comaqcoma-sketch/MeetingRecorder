@@ -27,6 +27,14 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" "cmake;3.22.1"
 
+      - name: 내장 AI 엔진(llama.cpp) 버전 선택
+        run: |
+          TAG=$(git ls-remote --tags https://github.com/ggml-org/llama.cpp 'refs/tags/b5*' \
+            | sed 's#.*refs/tags/##' | grep -E '^b5[0-9]{3}$' | sort -V | awk -F b '$2>=5000' | head -1)
+          echo "선택된 태그: $TAG"
+          test -n "$TAG"
+          echo "LLAMA_TAG=$TAG" >> "$GITHUB_ENV"
+
       - name: APK 빌드
         run: |
           chmod +x gradlew

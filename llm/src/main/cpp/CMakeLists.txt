@@ -11,13 +11,20 @@ set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-set(GGML_CPU_ARM_ARCH "armv8.2-a+fp16+dotprod" CACHE STRING "" FORCE)
+
+# llama.cpp 버전: CI가 실제 존재하는 태그를 골라 환경변수로 넘김 (없으면 b5000)
+if(DEFINED ENV{LLAMA_TAG})
+    set(LLAMA_TAG $ENV{LLAMA_TAG})
+else()
+    set(LLAMA_TAG b5000)
+endif()
+message(STATUS "llama.cpp tag: ${LLAMA_TAG}")
 
 include(FetchContent)
 FetchContent_Declare(
     llama
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
-    GIT_TAG b5000
+    GIT_TAG ${LLAMA_TAG}
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(llama)
