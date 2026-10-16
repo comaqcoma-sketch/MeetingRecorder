@@ -22,16 +22,21 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: 빌드 도구(NDK·CMake) 설치
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" "cmake;3.22.1"
+
       - name: APK 빌드
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: 휴대폰용 다운로드 링크에 올리기
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk meeting-recorder.apk
+          cp app/build/outputs/apk/release/app-release.apk meeting-recorder.apk
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest meeting-recorder.apk \
             --title "회의 녹음 최신 빌드" \

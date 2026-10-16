@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -90,6 +91,9 @@ fun MeetingRecorderScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val rec by RecorderService.state.collectAsStateWithLifecycle()
+    val tr by TranscribeService.state.collectAsStateWithLifecycle()
+    var openDetail by remember { mutableStateOf<Recording?>(null) }
+    var askModelFor by remember { mutableStateOf<Recording?>(null) }
     val snackbar = remember { SnackbarHostState() }
 
     var recordings by remember { mutableStateOf<List<Recording>>(emptyList()) }
@@ -102,7 +106,7 @@ fun MeetingRecorderScreen() {
     DisposableEffect(Unit) { onDispose { player.release() } }
 
     // 목록 불러오기 (녹음 저장·삭제 시 새로고침)
-    LaunchedEffect(rec.savedCount, rec.filePath, reloadKey) {
+    LaunchedEffect(rec.savedCount, rec.filePath, reloadKey, tr.doneCount) {
         recordings = RecordingStore.list(ctx, excludePath = rec.filePath)
     }
     // 재생 위치 갱신
@@ -112,6 +116,13 @@ fun MeetingRecorderScreen() {
     // 오류 메시지
     LaunchedEffect(rec.error) {
         rec.error?.let { snackbar.showSnackbar(it); RecorderService.clearError() }
+    }
+    LaunchedEffect(tr.error) {
+        tr.error?.let { snackbar.showSnackbar(it); TranscribeService.clearError() }
+    }
+    // 변환 완료 알림
+    LaunchedEffect(tr.doneCount) {
+        if (tr.doneCount > 0) snackbar.showSnackbar("텍스트 변환·요약이 완료됐습니다.")
     }
     // 녹음 시작하면 재생 중지 (마이크·스피커 충돌 방지)
     LaunchedEffect(rec.status) {
@@ -128,6 +139,11 @@ fun MeetingRecorderScreen() {
         }
     }
 
+    fun startTranscribe(r: Recording) {
+        if (ModelManager.selected(ctx) == null) askModelFor = r
+        else TranscribeService.start(ctx, r.path)
+    }
+
     fun startWithPermission() {
         val needed = buildList {
             add(Manifest.permission.RECORD_AUDIO)
@@ -135,6 +151,12 @@ fun MeetingRecorderScreen() {
         }.filter { ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
         if (needed.isEmpty()) RecorderService.send(ctx, RecorderService.ACTION_START)
         else permLauncher.launch(needed.toTypedArray())
+    }
+
+    val detail = openDetail
+    if (detail != null) {
+        DetailScreen(detail, onBack = { openDetail = null })
+        return
     }
 
     Scaffold(
@@ -183,7 +205,17 @@ fun MeetingRecorderScreen() {
                         playingPath = if (started) r.path else null
                     },
                     onShare = { RecordingStore.share(ctx, r) },
-                    onDelete = { toDelete = r }
+                    onDelete = { toDelete = r },
+                    transcribing = tr.path == r.path,
+                    transcribeBusy = tr.path != null,
+                    phase = tr.phase,
+                    progress = tr.progress,
+                    onTranscribe = { startTranscribe(r) },
+                    onCancelTranscribe = { TranscribeService.cancel(ctx) },
+                    onOpen = {
+                        if (playingPath != null) { player.release(); playingPath = null }
+                        openDetail = r
+                    }
                 )
             }
         }
@@ -205,6 +237,44 @@ fun MeetingRecorderScreen() {
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("취소") } }
         )
     }
+
+    askModelFor?.let { r ->
+        ModelChoiceDialog(
+            onPick = { m ->
+                ModelManager.select(ctx, m)
+                askModelFor = null
+                TranscribeService.start(ctx, r.path)
+            },
+            onDismiss = { askModelFor = null }
+        )
+    }
+}
+
+@Composable
+fun ModelChoiceDialog(onPick: (WhisperModel) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("변환 방식 선택") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "녹음은 폰 밖으로 나가지 않고, 폰 안에서 텍스트로 바뀝니다. " +
+                        "처음 한 번만 변환 모델을 내려받습니다 (Wi-Fi 권장).",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                WhisperModel.entries.forEach { m ->
+                    OutlinedButton(onClick = { onPick(m) }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text("${m.label} · ${m.sizeMb}MB", style = MaterialTheme.typography.titleSmall)
+                            Text(m.desc, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
 }
 
 @Composable
@@ -277,7 +347,14 @@ fun RecordingItem(
     canPlay: Boolean,
     onPlay: () -> Unit,
     onShare: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    transcribing: Boolean,
+    transcribeBusy: Boolean,
+    phase: String,
+    progress: Int,
+    onTranscribe: () -> Unit,
+    onCancelTranscribe: () -> Unit,
+    onOpen: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
@@ -295,10 +372,34 @@ fun RecordingItem(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp, end = 8.dp)
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            when {
+                transcribing -> {
+                    Text("$phase · $progress%", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    LinearProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, end = 8.dp)
+                    )
+                    Text("화면을 꺼도 계속 진행됩니다.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                }
+                rec.hasText -> FilledTonalButton(
+                    onClick = onOpen, modifier = Modifier.fillMaxWidth().padding(end = 8.dp)
+                ) { Text("📝 회의록 보기 (요약·전체 텍스트)") }
+                else -> OutlinedButton(
+                    onClick = onTranscribe, enabled = !transcribeBusy,
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp)
+                ) { Text(if (transcribeBusy) "다른 녹음 변환 중…" else "텍스트 변환 + 요약") }
+            }
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                TextButton(onClick = onPlay, enabled = canPlay) { Text(if (isPlaying) "■ 중지" else "▶ 재생") }
-                TextButton(onClick = onShare) { Text("공유") }
-                TextButton(onClick = onDelete) { Text("삭제", color = MaterialTheme.colorScheme.error) }
+                if (transcribing) {
+                    TextButton(onClick = onCancelTranscribe) { Text("변환 취소") }
+                } else {
+                    TextButton(onClick = onPlay, enabled = canPlay) { Text(if (isPlaying) "■ 중지" else "▶ 재생") }
+                    TextButton(onClick = onShare) { Text("공유") }
+                    TextButton(onClick = onDelete) { Text("삭제", color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
     }
