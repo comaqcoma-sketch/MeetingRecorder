@@ -250,7 +250,8 @@ class TranscribeService : Service() {
 
     /** Whisper가 무음 구간에 만드는 잡음 표시 제거 */
     private fun cleanText(t: String): String {
-        val s = t.trim()
+        // Whisper가 대화체 앞에 붙이는 "- " 제거
+        val s = t.trim().trimStart('-', '–', '—', ' ').trim()
         if (s.isEmpty()) return ""
         if ((s.startsWith("[") && s.endsWith("]")) || (s.startsWith("(") && s.endsWith(")"))) return ""
         if (s == "..." || s == "…") return ""

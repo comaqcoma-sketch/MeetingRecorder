@@ -72,7 +72,10 @@ object RecordingStore {
         if (!f.exists()) return@withContext emptyList()
         f.readLines().mapNotNull { line ->
             val p = line.split('\t', limit = 3)
-            if (p.size == 3) Segment(p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: 0L, p[2]) else null
+            if (p.size == 3) Segment(
+                p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: 0L,
+                p[2].trim().trimStart('-', '–', '—', ' ').trim()   // 이전 버전 텍스트의 "- " 정리
+            ) else null
         }
     }
 
