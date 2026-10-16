@@ -16,9 +16,7 @@ android {
             cmake {
                 arguments += "-DCMAKE_BUILD_TYPE=Release"
                 cppFlags += "-O3"
-                // 2018년 이후 대부분의 휴대폰 CPU(ARMv8.2) 가속 명령
-                cFlags += "-march=armv8.2-a+fp16+dotprod"
-                cppFlags += "-march=armv8.2-a+fp16+dotprod"
+                // 특정 CPU 전용 명령은 쓰지 않음 → 저가·구형 폰 포함 모든 64비트 폰에서 동작
             }
         }
     }

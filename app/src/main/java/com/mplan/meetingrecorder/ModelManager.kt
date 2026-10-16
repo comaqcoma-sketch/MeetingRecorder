@@ -21,10 +21,40 @@ object LocalLlm {
     const val URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/$FILE"
 }
 
+/** 폰 사양 확인 (여러 사람이 다양한 폰에서 쓰므로) */
+object Device {
+    fun totalRamGb(ctx: Context): Double {
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return mi.totalMem / 1_073_741_824.0
+    }
+
+    /** 내장 AI(1.1GB)를 무리 없이 돌릴 수 있는지: RAM 약 6GB 이상 */
+    fun canRunLocalLlm(ctx: Context) = totalRamGb(ctx) >= 5.0
+
+    fun freeStorageMb(ctx: Context): Long = android.os.StatFs(ctx.filesDir.path).availableBytes / 1_048_576
+}
+
+enum class SpeechLang(val code: String, val label: String, val desc: String) {
+    KO("ko", "한국어", "한국어 회의 (가장 정확)"),
+    AUTO("auto", "자동 감지", "영어 등 다른 언어 회의도 인식 · 한국어는 '한국어' 선택이 더 정확");
+}
+
 object ModelManager {
     private const val PREFS = "settings"
     private const val KEY_MODEL = "model"
     private const val KEY_AI = "ai_summary"
+    private const val KEY_LANG = "lang"
+
+    fun lang(ctx: Context): SpeechLang {
+        val v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LANG, null)
+        return SpeechLang.entries.firstOrNull { it.name == v } ?: SpeechLang.KO
+    }
+
+    fun setLang(ctx: Context, l: SpeechLang) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_LANG, l.name).apply()
+    }
 
     /** AI 요약 사용 여부. null = 아직 안 정함 */
     fun aiSummary(ctx: Context): Boolean? {
@@ -40,8 +70,16 @@ object ModelManager {
     fun llmFile(ctx: Context) = File(dir(ctx), LocalLlm.FILE)
     fun isLlmDownloaded(ctx: Context) = llmFile(ctx).let { it.exists() && it.length() > 100_000_000 }
 
-    fun downloadLlm(ctx: Context, onProgress: (Int) -> Unit, isCancelled: () -> Boolean) =
+    fun downloadLlm(ctx: Context, onProgress: (Int) -> Unit, isCancelled: () -> Boolean) {
+        checkSpace(ctx, LocalLlm.SIZE_MB)
         downloadUrl(LocalLlm.URL, llmFile(ctx), LocalLlm.SIZE_MB, onProgress, isCancelled)
+    }
+
+    private fun checkSpace(ctx: Context, sizeMb: Int) {
+        val need = sizeMb + 300L
+        val free = Device.freeStorageMb(ctx)
+        if (free < need) throw IllegalStateException("저장 공간이 부족합니다. ${need}MB가 필요한데 ${free}MB 남아 있습니다.")
+    }
 
     fun dir(ctx: Context) = File(ctx.filesDir, "models").apply { mkdirs() }
 
@@ -61,8 +99,10 @@ object ModelManager {
     }
 
     /** 다운로드. onProgress(0~100). isCancelled()가 true면 중단 */
-    fun download(ctx: Context, m: WhisperModel, onProgress: (Int) -> Unit, isCancelled: () -> Boolean) =
+    fun download(ctx: Context, m: WhisperModel, onProgress: (Int) -> Unit, isCancelled: () -> Boolean) {
+        checkSpace(ctx, m.sizeMb)
         downloadUrl(m.url, file(ctx, m), m.sizeMb, onProgress, isCancelled)
+    }
 
     private fun downloadUrl(
         urlStr: String, target: File, sizeMb: Int,

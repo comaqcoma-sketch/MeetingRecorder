@@ -92,7 +92,8 @@ class AiSummarizer(
         } else nano.close()
         if (isCancelled()) return null
 
-        // 2) 내장 AI
+        // 2) 내장 AI (메모리가 부족한 폰은 건너뛰고 기본 요약 사용 → 앱이 강제 종료되지 않도록)
+        if (!Device.canRunLocalLlm(ctx)) return null
         if (!ModelManager.isLlmDownloaded(ctx)) {
             val label = "AI 요약 모델 다운로드 (최초 1회, ${LocalLlm.SIZE_MB}MB)"
             onPhase(label, 0)

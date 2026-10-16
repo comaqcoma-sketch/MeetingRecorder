@@ -284,6 +284,9 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
     val ctx = LocalContext.current
     var model by remember { mutableStateOf(ModelManager.selected(ctx) ?: WhisperModel.SMALL) }
     var ai by remember { mutableStateOf(ModelManager.aiSummary(ctx) ?: true) }
+    var lang by remember { mutableStateOf(ModelManager.lang(ctx)) }
+    val ramGb = remember { Device.totalRamGb(ctx) }
+    val localOk = remember { Device.canRunLocalLlm(ctx) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("변환·요약 설정") },
@@ -295,10 +298,17 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
                     ChoiceRow(model == m, "${m.label} · ${m.sizeMb}MB", m.desc) { model = m }
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("2. 요약 방식", style = MaterialTheme.typography.labelLarge,
+                Text("2. 회의 언어", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                SpeechLang.entries.forEach { l ->
+                    ChoiceRow(lang == l, l.label, l.desc) { lang = l }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("3. 요약 방식", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
                 ChoiceRow(ai, "AI 요약 (권장)",
-                    "지원 폰은 Gemini Nano 사용(추가 다운로드 없음), 그 외 폰은 내장 AI ${LocalLlm.SIZE_MB}MB를 처음 한 번 받음") { ai = true }
+                    if (localOk) "지원 폰은 Gemini Nano 사용(추가 다운로드 없음), 그 외 폰은 내장 AI ${LocalLlm.SIZE_MB}MB를 처음 한 번 받음"
+                    else "Gemini Nano 지원 폰에서만 AI 요약. 이 폰은 메모리(${"%.1f".format(ramGb)}GB)가 작아 내장 AI 대신 기본 요약으로 자동 전환") { ai = true }
                 ChoiceRow(!ai, "기본 요약", "AI 없이 중요한 문장만 골라 보여줌 · 추가 다운로드 없음") { ai = false }
                 Spacer(Modifier.height(12.dp))
                 Text(
@@ -313,6 +323,7 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
             TextButton(onClick = {
                 ModelManager.select(ctx, model)
                 ModelManager.setAiSummary(ctx, ai)
+                ModelManager.setLang(ctx, lang)
                 onDone()
             }) { Text(confirmLabel) }
         },

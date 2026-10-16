@@ -160,6 +160,7 @@ class TranscribeService : Service() {
 
                 // 3) 음성 → 텍스트 (5분 단위)
                 val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                val lang = ModelManager.lang(this).code
                 val list = ArrayList<Segment>()
                 chunkStart = 0L
                 chunkLen = 0L
@@ -176,7 +177,7 @@ class TranscribeService : Service() {
                         if (cancelled) return@decode false
                         chunkStart = startMs
                         chunkLen = samples.size * 1000L / AudioDecoder.TARGET_RATE
-                        val raw = WhisperLib.transcribe(ctxPtr, samples, "ko", threads)
+                        val raw = WhisperLib.transcribe(ctxPtr, samples, lang, threads)
                         if (cancelled) return@decode false
                         if (raw == null) throw IllegalStateException("텍스트 변환 중 오류가 발생했습니다.")
                         raw.forEach { bytes ->
