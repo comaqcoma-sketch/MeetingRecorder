@@ -22,6 +22,7 @@
 코드를 고쳐서 다시 올리면 자동으로 새 APK가 만들어지고, 같은 주소로 받아 덮어 설치하면 기존 녹음은 유지됩니다.
 
 ## Android Studio로 직접 빌드
+먼저 [sherpa-onnx-1.13.7.aar](https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar)를 받아 `app/libs/sherpa-onnx.aar`로 저장.
 폴더를 열고 ▶ Run (휴대폰 USB 디버깅 연결).
 
 ## 독립 실행 원칙
