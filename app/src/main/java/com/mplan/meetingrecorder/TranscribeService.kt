@@ -47,6 +47,7 @@ class TranscribeService : Service() {
         const val ACTION_START = "com.mplan.meetingrecorder.TRANSCRIBE"
         const val ACTION_CANCEL = "com.mplan.meetingrecorder.TRANSCRIBE_CANCEL"
         const val EXTRA_PATH = "path"
+        const val EXTRA_SUMMARY_ONLY = "summary_only"
 
         private const val CHANNEL_ID = "transcribe"
         private const val NOTIF_ID = 2001
@@ -55,11 +56,13 @@ class TranscribeService : Service() {
         private val _state = MutableStateFlow(TranscribeState())
         val state: StateFlow<TranscribeState> = _state.asStateFlow()
 
-        fun start(context: Context, path: String) {
+        /** @param summaryOnly true면 텍스트 변환은 건너뛰고 요약만 다시 만듦 */
+        fun start(context: Context, path: String, summaryOnly: Boolean = false) {
             if (_state.value.path != null) return  // 한 번에 하나씩
             ContextCompat.startForegroundService(
                 context,
-                Intent(context, TranscribeService::class.java).setAction(ACTION_START).putExtra(EXTRA_PATH, path)
+                Intent(context, TranscribeService::class.java).setAction(ACTION_START)
+                    .putExtra(EXTRA_PATH, path).putExtra(EXTRA_SUMMARY_ONLY, summaryOnly)
             )
         }
 
@@ -97,11 +100,13 @@ class TranscribeService : Service() {
                 }
                 cancelled = false
                 _state.update { it.copy(path = path, phase = "준비 중", progress = 0, error = null) }
-                job = scope.launch { process(path) }
+                val summaryOnly = intent.getBooleanExtra(EXTRA_SUMMARY_ONLY, false)
+                job = scope.launch { process(path, summaryOnly) }
             }
             ACTION_CANCEL -> {
                 cancelled = true
                 try { WhisperLib.abort() } catch (_: Throwable) { }
+                try { com.mplan.llm.LlamaLib.abort() } catch (_: Throwable) { }
             }
             else -> if (job?.isActive != true) stopSelf()
         }
@@ -118,7 +123,7 @@ class TranscribeService : Service() {
         } catch (_: SecurityException) { }
     }
 
-    private suspend fun process(path: String) {
+    private suspend fun process(path: String, summaryOnly: Boolean) {
         // 화면이 꺼져도 CPU가 멈추지 않도록 (최대 6시간, 끝나면 즉시 해제)
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MeetingRecorder:transcribe")
@@ -128,72 +133,97 @@ class TranscribeService : Service() {
         var error: String? = null
         var success = false
         try {
-            val model = ModelManager.selected(this) ?: WhisperModel.SMALL
-
-            // 1) 모델 (최초 1회)
-            if (!ModelManager.isDownloaded(this, model)) {
-                setPhase("모델 다운로드 (최초 1회, ${model.sizeMb}MB)", 0)
-                ModelManager.download(this, model, { p -> setPhase("모델 다운로드 (최초 1회, ${model.sizeMb}MB)", p) }, { cancelled })
-            }
-            if (cancelled) throw InterruptedException()
-
-            // 2) 모델 불러오기
-            setPhase("변환 엔진 준비 중", 0)
-            ctxPtr = WhisperLib.initContext(ModelManager.file(this, model).absolutePath)
-            if (ctxPtr == 0L) {
-                ModelManager.file(this, model).delete()  // 손상된 파일이면 다음에 다시 받도록
-                throw IllegalStateException("변환 모델을 불러오지 못했습니다. 다시 시도해 주세요.")
-            }
-            WhisperLib.resetAbort()
-
-            // 3) 음성 → 텍스트 (5분 단위)
             val totalMs = AudioDecoder.durationMs(path).coerceAtLeast(1L)
-            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-            val segments = ArrayList<Segment>()
-            chunkStart = 0L
-            chunkLen = 0L
+            val segments: List<Segment>
+            if (summaryOnly) {
+                segments = RecordingStore.loadTranscript(path)
+                if (segments.isEmpty()) throw IllegalStateException("변환된 텍스트가 없습니다.")
+            } else {
+                val model = ModelManager.selected(this) ?: WhisperModel.SMALL
 
-            val poller = scope.launch {
-                while (isActive) {
-                    val p = WhisperLib.getProgress().coerceIn(0, 100)
-                    val overall = ((chunkStart + chunkLen * p / 100) * 100 / totalMs).toInt().coerceIn(0, 99)
-                    setPhase("텍스트 변환 중", overall)
-                    delay(700)
+                // 1) 변환 모델 (최초 1회)
+                if (!ModelManager.isDownloaded(this, model)) {
+                    val label = "변환 모델 다운로드 (최초 1회, ${model.sizeMb}MB)"
+                    setPhase(label, 0)
+                    ModelManager.download(this, model, { p -> setPhase(label, p) }, { cancelled })
                 }
-            }
-            try {
-                AudioDecoder.decode(path, CHUNK_SECONDS) { samples, startMs ->
-                    if (cancelled) return@decode false
-                    chunkStart = startMs
-                    chunkLen = samples.size * 1000L / AudioDecoder.TARGET_RATE
-                    val raw = WhisperLib.transcribe(ctxPtr, samples, "ko", threads)
-                    if (cancelled) return@decode false
-                    if (raw == null) throw IllegalStateException("텍스트 변환 중 오류가 발생했습니다.")
-                    raw.forEach { bytes ->
-                        val parts = String(bytes, Charsets.UTF_8).split('\t', limit = 3)
-                        if (parts.size == 3) {
-                            val text = cleanText(parts[2])
-                            if (text.isNotEmpty() && segments.lastOrNull()?.text != text) {
-                                segments += Segment(
-                                    startMs + (parts[0].toLongOrNull() ?: 0L),
-                                    startMs + (parts[1].toLongOrNull() ?: 0L),
-                                    text
-                                )
+                if (cancelled) throw InterruptedException()
+
+                // 2) 모델 불러오기
+                setPhase("변환 엔진 준비 중", 0)
+                ctxPtr = WhisperLib.initContext(ModelManager.file(this, model).absolutePath)
+                if (ctxPtr == 0L) {
+                    ModelManager.file(this, model).delete()  // 손상된 파일이면 다음에 다시 받도록
+                    throw IllegalStateException("변환 모델을 불러오지 못했습니다. 다시 시도해 주세요.")
+                }
+                WhisperLib.resetAbort()
+
+                // 3) 음성 → 텍스트 (5분 단위)
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                val list = ArrayList<Segment>()
+                chunkStart = 0L
+                chunkLen = 0L
+                val poller = scope.launch {
+                    while (isActive) {
+                        val p = WhisperLib.getProgress().coerceIn(0, 100)
+                        val overall = ((chunkStart + chunkLen * p / 100) * 100 / totalMs).toInt().coerceIn(0, 99)
+                        setPhase("텍스트 변환 중", overall)
+                        delay(700)
+                    }
+                }
+                try {
+                    AudioDecoder.decode(path, CHUNK_SECONDS) { samples, startMs ->
+                        if (cancelled) return@decode false
+                        chunkStart = startMs
+                        chunkLen = samples.size * 1000L / AudioDecoder.TARGET_RATE
+                        val raw = WhisperLib.transcribe(ctxPtr, samples, "ko", threads)
+                        if (cancelled) return@decode false
+                        if (raw == null) throw IllegalStateException("텍스트 변환 중 오류가 발생했습니다.")
+                        raw.forEach { bytes ->
+                            val parts = String(bytes, Charsets.UTF_8).split('\t', limit = 3)
+                            if (parts.size == 3) {
+                                val text = cleanText(parts[2])
+                                if (text.isNotEmpty() && list.lastOrNull()?.text != text) {
+                                    list += Segment(
+                                        startMs + (parts[0].toLongOrNull() ?: 0L),
+                                        startMs + (parts[1].toLongOrNull() ?: 0L),
+                                        text
+                                    )
+                                }
                             }
                         }
+                        true
                     }
-                    true
+                } finally {
+                    poller.cancel()
                 }
-            } finally {
-                poller.cancel()
+                if (cancelled) throw InterruptedException()
+                // 변환 엔진은 바로 해제 → AI 요약에 메모리 양보
+                WhisperLib.freeContext(ctxPtr)
+                ctxPtr = 0L
+                RecordingStore.saveTranscript(this, path, list)
+                segments = list
             }
-            if (cancelled) throw InterruptedException()
 
-            // 4) 저장 + 요약
-            setPhase("요약 정리 중", 99)
-            RecordingStore.saveTranscript(this, path, segments)
+            // 4) 요약: AI(Gemini Nano → 내장 AI) → 실패하면 기본(규칙) 요약
             val title = RecordingStore.titleOf(File(path))
-            val summary = Summarizer.toMarkdown(title, totalMs, Summarizer.summarize(segments))
+            var body: String? = null
+            var engineName = "기본 요약 (AI 아님)"
+            if (ModelManager.aiSummary(this) == true) {
+                val ai = AiSummarizer(this, { cancelled }, ::setPhase)
+                val r = try { ai.summarize(segments) } catch (_: InterruptedException) {
+                    throw InterruptedException()
+                } catch (_: Throwable) { null }
+                if (cancelled) throw InterruptedException()
+                if (r != null) { body = r.first; engineName = r.second }
+            }
+            setPhase("요약 저장 중", 99)
+            val summary = if (body != null) {
+                "# 회의 요약 — $title\n회의 길이: ${formatElapsed(totalMs)} · 요약: $engineName\n\n$body\n"
+            } else {
+                Summarizer.toMarkdown(title, totalMs, Summarizer.summarize(segments))
+                    .replaceFirst("\n", "\n요약: $engineName\n")
+            }
             RecordingStore.summaryFile(path).writeText(summary)
             success = true
         } catch (_: InterruptedException) {

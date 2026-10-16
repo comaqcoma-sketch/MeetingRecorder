@@ -25,4 +25,4 @@ FetchContent_MakeAvailable(whisper)
 add_library(whisperjni SHARED whisper_jni.cpp)
 target_link_libraries(whisperjni PRIVATE whisper android log)
 # Android 15+ 16KB 페이지 기기 호환
-target_link_options(whisperjni PRIVATE "-Wl,-z,max-page-size=16384")
+target_link_options(whisperjni PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic" "-Wl,-z,max-page-size=16384")

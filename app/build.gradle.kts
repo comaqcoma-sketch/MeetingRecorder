@@ -13,8 +13,8 @@ android {
         applicationId = "com.mplan.meetingrecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         ndk {
             abiFilters += "arm64-v8a"   // 요즘 휴대폰(64비트) 전용 → 빌드·용량 절약
@@ -83,4 +83,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // AI 요약: 내장 소형 AI(llama.cpp) + 지원 폰의 Gemini Nano
+    implementation(project(":llm"))
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 }

@@ -25,6 +25,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -94,6 +98,7 @@ fun MeetingRecorderScreen() {
     val tr by TranscribeService.state.collectAsStateWithLifecycle()
     var openDetail by remember { mutableStateOf<Recording?>(null) }
     var askModelFor by remember { mutableStateOf<Recording?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
 
     var recordings by remember { mutableStateOf<List<Recording>>(emptyList()) }
@@ -140,7 +145,7 @@ fun MeetingRecorderScreen() {
     }
 
     fun startTranscribe(r: Recording) {
-        if (ModelManager.selected(ctx) == null) askModelFor = r
+        if (ModelManager.selected(ctx) == null || ModelManager.aiSummary(ctx) == null) askModelFor = r
         else TranscribeService.start(ctx, r.path)
     }
 
@@ -160,7 +165,12 @@ fun MeetingRecorderScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("회의 녹음") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("회의 녹음") },
+                actions = { TextButton(onClick = { showSettings = true }) { Text("설정") } }
+            )
+        },
         snackbarHost = { SnackbarHost(snackbar) }
     ) { inner ->
         LazyColumn(
@@ -239,40 +249,73 @@ fun MeetingRecorderScreen() {
     }
 
     askModelFor?.let { r ->
-        ModelChoiceDialog(
-            onPick = { m ->
-                ModelManager.select(ctx, m)
+        SetupDialog(
+            confirmLabel = "변환 시작",
+            onDone = {
                 askModelFor = null
                 TranscribeService.start(ctx, r.path)
             },
             onDismiss = { askModelFor = null }
         )
     }
+    if (showSettings) {
+        SetupDialog(confirmLabel = "저장", onDone = { showSettings = false }, onDismiss = { showSettings = false })
+    }
 }
 
 @Composable
-fun ModelChoiceDialog(onPick: (WhisperModel) -> Unit, onDismiss: () -> Unit) {
+private fun ChoiceRow(selected: Boolean, title: String, desc: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Column(Modifier.padding(top = 10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(desc, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** 변환 모델 + 요약 방식 설정 */
+@Composable
+fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var model by remember { mutableStateOf(ModelManager.selected(ctx) ?: WhisperModel.SMALL) }
+    var ai by remember { mutableStateOf(ModelManager.aiSummary(ctx) ?: true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("변환 방식 선택") },
+        title = { Text("변환·요약 설정") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "녹음은 폰 밖으로 나가지 않고, 폰 안에서 텍스트로 바뀝니다. " +
-                        "처음 한 번만 변환 모델을 내려받습니다 (Wi-Fi 권장).",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("1. 음성 → 텍스트", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
                 WhisperModel.entries.forEach { m ->
-                    OutlinedButton(onClick = { onPick(m) }, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                            Text("${m.label} · ${m.sizeMb}MB", style = MaterialTheme.typography.titleSmall)
-                            Text(m.desc, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+                    ChoiceRow(model == m, "${m.label} · ${m.sizeMb}MB", m.desc) { model = m }
                 }
+                Spacer(Modifier.height(12.dp))
+                Text("2. 요약 방식", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                ChoiceRow(ai, "AI 요약 (권장)",
+                    "지원 폰은 Gemini Nano 사용(추가 다운로드 없음), 그 외 폰은 내장 AI ${LocalLlm.SIZE_MB}MB를 처음 한 번 받음") { ai = true }
+                ChoiceRow(!ai, "기본 요약", "AI 없이 중요한 문장만 골라 보여줌 · 추가 다운로드 없음") { ai = false }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "모든 처리는 폰 안에서 이루어지며 녹음과 텍스트는 외부로 전송되지 않습니다. " +
+                        "모델 다운로드는 처음 한 번만 하며 Wi-Fi를 권장합니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            TextButton(onClick = {
+                ModelManager.select(ctx, model)
+                ModelManager.setAiSummary(ctx, ai)
+                onDone()
+            }) { Text(confirmLabel) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )
 }

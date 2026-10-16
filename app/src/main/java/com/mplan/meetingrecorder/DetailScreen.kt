@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -67,7 +69,10 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
     DisposableEffect(Unit) { onDispose { player.release() } }
     BackHandler { onBack() }
 
-    LaunchedEffect(rec.path) {
+    val tr by TranscribeService.state.collectAsStateWithLifecycle()
+    val working = tr.path == rec.path
+
+    LaunchedEffect(rec.path, tr.doneCount) {
         summary = RecordingStore.loadSummary(rec.path)
         segments = RecordingStore.loadTranscript(rec.path)
     }
@@ -85,6 +90,14 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
                 title = { Text(rec.title, style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("‹ 목록") } },
                 actions = {
+                    TextButton(
+                        enabled = tr.path == null,
+                        onClick = {
+                            if (ModelManager.aiSummary(ctx) != true) ModelManager.setAiSummary(ctx, true)
+                            TranscribeService.start(ctx, rec.path, summaryOnly = true)
+                            tab = 0
+                        }
+                    ) { Text("AI 다시 요약") }
                     TextButton(onClick = {
                         scope.launch { RecordingStore.shareText(ctx, rec.title, RecordingStore.exportText(rec.path)) }
                     }) { Text("공유") }
@@ -105,6 +118,21 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
         }
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
+            if (working) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text("${tr.phase} · ${tr.progress}%", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    LinearProgressIndicator(progress = { tr.progress / 100f },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    Text("AI 요약 중에는 이 화면을 켜 두면 더 빠르고 정확한 엔진을 쓸 수 있습니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            if (tr.error != null && tr.path == null) {
+                Text(tr.error ?: "", color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+            }
             TabRow(selectedTabIndex = tab) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("요약") })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("전체 텍스트 (${segments.size})") })
@@ -153,7 +181,7 @@ private fun SummaryView(md: String, onTime: (Long) -> Unit) {
         }
         item {
             Text(
-                "※ 폰 안에서 자동 추출한 요약입니다. 시간이 표시된 줄을 누르면 그 부분부터 재생됩니다.",
+                "※ 폰 안에서 만든 요약입니다. 중요한 내용은 전체 텍스트에서 한 번 더 확인하세요. 시간이 표시된 줄을 누르면 그 부분부터 재생됩니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 20.dp)
