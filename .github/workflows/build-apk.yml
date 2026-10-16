@@ -30,7 +30,19 @@ jobs:
       - name: APK 빌드
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: 오류 요약 표시
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|FAILED|CMake Error|undefined reference|> " build.log | head -60 > err.txt || true
+          python3 - <<'PY'
+          lines = open("err.txt", encoding="utf-8", errors="replace").read().splitlines()
+          for i in range(0, len(lines), 12):
+              msg = "%0A".join(l.replace("%", "%25").replace("\r", "")[:300] for l in lines[i:i+12])
+              print("::error title=build-%d::%s" % (i // 12, msg))
+          PY
 
       - name: 휴대폰용 다운로드 링크에 올리기
         env:
