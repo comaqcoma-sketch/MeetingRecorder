@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -90,14 +91,6 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
                 title = { Text(rec.title, style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("‹ 목록") } },
                 actions = {
-                    TextButton(
-                        enabled = tr.path == null,
-                        onClick = {
-                            if (ModelManager.aiSummary(ctx) != true) ModelManager.setAiSummary(ctx, true)
-                            TranscribeService.start(ctx, rec.path, summaryOnly = true)
-                            tab = 0
-                        }
-                    ) { Text("AI 다시 요약") }
                     TextButton(onClick = {
                         scope.launch { RecordingStore.shareText(ctx, rec.title, RecordingStore.exportText(rec.path)) }
                     }) { Text("공유") }
@@ -124,9 +117,30 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.primary)
                     LinearProgressIndicator(progress = { tr.progress / 100f },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-                    Text("AI 요약 중에는 이 화면을 켜 두면 더 빠르고 정확한 엔진을 쓸 수 있습니다.",
+                    Text("설정의 '최고 정확' 모델은 시간이 더 걸립니다. 화면을 꺼도 계속 진행됩니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            if (!working) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = tr.path == null,
+                        modifier = Modifier.weight(1f),
+                        onClick = { player.release(); playing = false; TranscribeService.start(ctx, rec.path) }
+                    ) { Text("음성 다시 변환") }
+                    OutlinedButton(
+                        enabled = tr.path == null,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            if (ModelManager.aiSummary(ctx) != true) ModelManager.setAiSummary(ctx, true)
+                            TranscribeService.start(ctx, rec.path, summaryOnly = true)
+                            tab = 0
+                        }
+                    ) { Text("AI 다시 요약") }
                 }
             }
             if (tr.error != null && tr.path == null) {

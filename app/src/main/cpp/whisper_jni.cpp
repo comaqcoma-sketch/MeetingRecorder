@@ -49,7 +49,8 @@ Java_com_mplan_meetingrecorder_WhisperLib_resetAbort(JNIEnv *, jobject) {
 // 결과: 세그먼트마다 "시작ms\t끝ms\t텍스트" UTF-8 바이트 배열 (한글 깨짐 방지로 Kotlin에서 디코딩)
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_mplan_meetingrecorder_WhisperLib_transcribe(JNIEnv *env, jobject, jlong ptr,
-                                                     jfloatArray samples, jstring lang, jint threads) {
+                                                     jfloatArray samples, jstring lang, jint threads,
+                                                     jbyteArray promptBytes, jint beamSize) {
     auto *ctx = reinterpret_cast<whisper_context *>(ptr);
     if (!ctx) return nullptr;
 
@@ -57,7 +58,22 @@ Java_com_mplan_meetingrecorder_WhisperLib_transcribe(JNIEnv *env, jobject, jlong
     std::string language(langC);
     env->ReleaseStringUTFChars(lang, langC);
 
-    whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    // 힌트 문장 (회의 주제·이름·전문용어 → 인식 정확도 향상)
+    std::string prompt;
+    if (promptBytes) {
+        jsize pl = env->GetArrayLength(promptBytes);
+        prompt.resize((size_t) pl);
+        if (pl > 0) env->GetByteArrayRegion(promptBytes, 0, pl, reinterpret_cast<jbyte *>(&prompt[0]));
+    }
+
+    // 빔 서치: 여러 후보 문장을 비교해서 더 정확한 쪽을 고름 (조금 느려짐)
+    whisper_full_params wp = whisper_full_default_params(
+        beamSize > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
+    if (beamSize > 1) {
+        wp.beam_search.beam_size = beamSize;
+        wp.greedy.best_of = beamSize;
+    }
+    if (!prompt.empty()) wp.initial_prompt = prompt.c_str();
     wp.n_threads = threads;
     wp.language = language.c_str();
     wp.translate = false;

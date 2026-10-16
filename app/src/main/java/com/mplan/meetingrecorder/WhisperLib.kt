@@ -8,7 +8,10 @@ object WhisperLib {
 
     external fun initContext(modelPath: String): Long
     external fun freeContext(ptr: Long)
-    external fun transcribe(ptr: Long, samples: FloatArray, lang: String, threads: Int): Array<ByteArray>?
+    /** @param prompt 인식 힌트(UTF-8) @param beamSize 1=빠름, 2 이상=빔 서치(정확) */
+    external fun transcribe(
+        ptr: Long, samples: FloatArray, lang: String, threads: Int, prompt: ByteArray, beamSize: Int
+    ): Array<ByteArray>?
     external fun getProgress(): Int
     external fun abort()
     external fun resetAbort()

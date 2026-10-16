@@ -81,7 +81,8 @@ class AiSummarizer(
     /** 결과: (마크다운 본문, 사용한 엔진 이름). 실패 시 null */
     suspend fun summarize(segments: List<Segment>): Pair<String, String>? {
         val text = segments.joinToString("\n") { it.text.trim() }.trim()
-        if (text.length < 30) return null
+        // 너무 짧으면 AI가 내용을 지어내기 쉬움 → 기본 요약 사용
+        if (text.length < MIN_CHARS) return null
 
         // 1) Gemini Nano
         onPhase("AI 요약 준비 중", 0)
@@ -119,7 +120,7 @@ class AiSummarizer(
         var parts = split(text, engine.chunkChars)
         if (parts.size == 1) {
             onPhase("AI 요약 중", 10)
-            return engine.generate(finalPrompt(parts[0], isNotes = false), 700)?.let { clean(it) }
+            return engine.generate(finalPrompt(parts[0], isNotes = false), 700)?.let { clean(it, text) }
         }
         var round = 0
         while (true) {
@@ -137,7 +138,7 @@ class AiSummarizer(
                 if (isCancelled()) return null
                 onPhase("AI 요약 마무리 중", 92)
                 val input = if (joined.length > engine.chunkChars) joined.take(engine.chunkChars) else joined
-                return engine.generate(finalPrompt(input, isNotes = true), 700)?.let { clean(it) }
+                return engine.generate(finalPrompt(input, isNotes = true), 700)?.let { clean(it, text) }
             }
             parts = split(joined, engine.chunkChars)
         }
@@ -158,7 +159,7 @@ class AiSummarizer(
     }
 
     /** 모델이 형식을 조금 어겨도 화면에 잘 보이게 정리 */
-    private fun clean(s: String): String? {
+    private fun clean(s: String, source: String): String? {
         val t = s.replace("```markdown", "").replace("```", "").replace("**", "").trim()
         if (t.length < 10) return null
         return t.lines().joinToString("\n") { line ->
@@ -169,46 +170,60 @@ class AiSummarizer(
                 l.startsWith("• ") -> "- " + l.removePrefix("• ")
                 else -> l
             }
-        }
+        }.lines().joinToString("\n") { dropInventedName(it, source) }
+    }
+
+    /** 할 일의 "담당자:"가 회의 내용에 없는 이름이면 지움 (AI가 지어낸 이름 방지) */
+    private fun dropInventedName(line: String, source: String): String {
+        val m = Regex("""^- \[ \] ([^:：\[\]]{1,12})[:：]\s*(.*)$""").find(line) ?: return line
+        val who = m.groupValues[1].trim()
+        return if (who.isNotEmpty() && !source.contains(who)) "- [ ] ${m.groupValues[2]}" else line
     }
 
     companion object {
+        private const val MIN_CHARS = 150
+
+        private const val RULES = """
+            규칙:
+            - 글에 실제로 나온 내용만 쓴다. 글에 없는 사람 이름, 날짜, 숫자, 결과(예: 성공했다, 정상 작동했다)는 절대 지어내지 않는다.
+            - 음성 인식 오타는 문맥상 명확할 때만 바로잡는다.
+            - 담당자나 기한이 글에 없으면 쓰지 않는다.
+            - 해당 내용이 없으면 "- 없음"이라고만 쓴다."""
+
         private const val SYSTEM =
             "너는 회의록을 정리하는 비서다. 반드시 한국어로 쓰고, 주어진 내용에 있는 사실만 사용한다. 추측해서 지어내지 않는다."
 
         private fun notesPrompt(chunk: String) = """
-            다음은 회의 녹음을 음성 인식으로 받아 적은 글의 일부다. 오타가 있을 수 있다.
+다음은 회의 녹음을 음성 인식으로 받아 적은 글의 일부다. 오타가 있을 수 있다.
 
-            <<<
-            $chunk
-            >>>
+<<<
+$chunk
+>>>
 
-            이 부분의 중요한 내용을 짧은 메모로 정리해라. 형식:
-            논의: (핵심 내용 2~5줄)
-            결정: (결정된 것. 없으면 없음)
-            할 일: (누가 무엇을 언제까지. 없으면 없음)
-        """.trimIndent()
+이 부분의 중요한 내용을 짧은 메모로 정리해라.
+${RULES.trimIndent()}
+
+형식:
+논의: (핵심 내용 2~5줄)
+결정: (정해진 것)
+할 일: (해야 할 일)
+"""
 
         private fun finalPrompt(input: String, isNotes: Boolean) = """
-            다음은 ${if (isNotes) "회의 내용을 부분별로 정리한 메모" else "회의 녹음을 음성 인식으로 받아 적은 글(오타가 있을 수 있음)"}다.
+다음은 ${if (isNotes) "회의 내용을 부분별로 정리한 메모" else "회의 녹음을 음성 인식으로 받아 적은 글(오타가 있을 수 있음)"}다.
 
-            <<<
-            $input
-            >>>
+<<<
+$input
+>>>
 
-            이 회의의 회의록을 아래 형식 그대로 작성해라. 해당 내용이 없으면 "- 없음"이라고 써라.
+이 회의의 회의록을 아래 네 개의 제목을 그대로 사용해서 작성해라.
+${RULES.trimIndent()}
 
-            ## 한 줄 요약
-            (회의 전체를 한 문장으로)
-
-            ## 핵심 내용
-            - (중요한 논의 내용 3~7개)
-
-            ## 결정사항
-            - (회의에서 정해진 것)
-
-            ## 할 일
-            - [ ] (담당자: 할 일, 기한)
-        """.trimIndent()
+## 한 줄 요약
+## 핵심 내용
+## 결정사항
+## 할 일
+(할 일은 "- [ ] " 로 시작하고, 글에 담당자·기한이 나오면 함께 적는다)
+"""
     }
 }

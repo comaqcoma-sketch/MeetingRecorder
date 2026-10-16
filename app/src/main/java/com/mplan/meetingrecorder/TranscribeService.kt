@@ -139,7 +139,7 @@ class TranscribeService : Service() {
                 segments = RecordingStore.loadTranscript(path)
                 if (segments.isEmpty()) throw IllegalStateException("변환된 텍스트가 없습니다.")
             } else {
-                val model = ModelManager.selected(this) ?: WhisperModel.SMALL
+                val model = ModelManager.selected(this) ?: ModelManager.recommended(this)
 
                 // 1) 변환 모델 (최초 1회)
                 if (!ModelManager.isDownloaded(this, model)) {
@@ -161,6 +161,7 @@ class TranscribeService : Service() {
                 // 3) 음성 → 텍스트 (5분 단위)
                 val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
                 val lang = ModelManager.lang(this).code
+                val hint = ModelManager.speechPrompt(this).toByteArray(Charsets.UTF_8)
                 val list = ArrayList<Segment>()
                 chunkStart = 0L
                 chunkLen = 0L
@@ -177,7 +178,7 @@ class TranscribeService : Service() {
                         if (cancelled) return@decode false
                         chunkStart = startMs
                         chunkLen = samples.size * 1000L / AudioDecoder.TARGET_RATE
-                        val raw = WhisperLib.transcribe(ctxPtr, samples, lang, threads)
+                        val raw = WhisperLib.transcribe(ctxPtr, samples, lang, threads, hint, model.beam)
                         if (cancelled) return@decode false
                         if (raw == null) throw IllegalStateException("텍스트 변환 중 오류가 발생했습니다.")
                         raw.forEach { bytes ->
@@ -210,7 +211,10 @@ class TranscribeService : Service() {
             val title = RecordingStore.titleOf(File(path))
             var body: String? = null
             var engineName = "기본 요약 (AI 아님)"
-            if (ModelManager.aiSummary(this) == true) {
+            val totalChars = segments.sumOf { it.text.length }
+            if (ModelManager.aiSummary(this) == true && totalChars < 150) {
+                engineName = "기본 요약 (내용이 짧아 AI 요약 생략)"
+            } else if (ModelManager.aiSummary(this) == true) {
                 val ai = AiSummarizer(this, { cancelled }, ::setPhase)
                 val r = try { ai.summarize(segments) } catch (_: InterruptedException) {
                     throw InterruptedException()

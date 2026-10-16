@@ -7,8 +7,12 @@ import java.net.URL
 
 /** 변환 모델 선택·다운로드 (앱 전용 저장소에만 보관, 최초 1회만 다운로드) */
 enum class WhisperModel(val label: String, val fileName: String, val sizeMb: Int, val desc: String) {
-    SMALL("정확 (권장)", "ggml-small-q5_1.bin", 190, "한국어 정확도가 좋음 · 변환 속도 보통"),
-    BASE("빠름", "ggml-base-q5_1.bin", 60, "변환이 빠름 · 한국어 정확도 낮음");
+    TURBO("최고 정확", "ggml-large-v3-turbo-q5_0.bin", 547, "발음 인식이 가장 정확함 · 변환이 느림 · RAM 6GB 이상 폰"),
+    SMALL("보통", "ggml-small-q5_1.bin", 190, "정확도·속도 중간 · 대부분의 폰"),
+    BASE("빠름", "ggml-base-q5_1.bin", 60, "변환이 빠름 · 한국어 정확도 낮음 · 저사양 폰");
+
+    /** 빔 서치 크기 (정확도↑ 속도↓) */
+    val beam get() = when (this) { TURBO -> 5; SMALL -> 3; BASE -> 1 }
 
     val url get() = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$fileName"
 }
@@ -46,6 +50,25 @@ object ModelManager {
     private const val KEY_MODEL = "model"
     private const val KEY_AI = "ai_summary"
     private const val KEY_LANG = "lang"
+    private const val KEY_WORDS = "words"
+
+    /** 폰 사양에 맞는 기본 변환 모델 */
+    fun recommended(ctx: Context) = if (Device.canRunLocalLlm(ctx)) WhisperModel.TURBO else WhisperModel.SMALL
+
+    /** 자주 나오는 단어 (이름·회사명·전문용어) */
+    fun words(ctx: Context): String =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_WORDS, "") ?: ""
+
+    fun setWords(ctx: Context, w: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_WORDS, w.trim().take(200)).apply()
+    }
+
+    /** Whisper 힌트 문장: 한국어 문장 스타일 + 사용자 단어 */
+    fun speechPrompt(ctx: Context): String {
+        val w = words(ctx)
+        val base = if (lang(ctx) == SpeechLang.KO) "다음은 한국어 회의 녹음입니다. 안녕하세요, 회의를 시작하겠습니다." else ""
+        return if (w.isBlank()) base else "$base 주요 단어: $w."
+    }
 
     fun lang(ctx: Context): SpeechLang {
         val v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LANG, null)

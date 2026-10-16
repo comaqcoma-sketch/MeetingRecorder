@@ -26,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -282,7 +283,8 @@ private fun ChoiceRow(selected: Boolean, title: String, desc: String, onClick: (
 @Composable
 fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
-    var model by remember { mutableStateOf(ModelManager.selected(ctx) ?: WhisperModel.SMALL) }
+    var model by remember { mutableStateOf(ModelManager.selected(ctx) ?: ModelManager.recommended(ctx)) }
+    var words by remember { mutableStateOf(ModelManager.words(ctx)) }
     var ai by remember { mutableStateOf(ModelManager.aiSummary(ctx) ?: true) }
     var lang by remember { mutableStateOf(ModelManager.lang(ctx)) }
     val ramGb = remember { Device.totalRamGb(ctx) }
@@ -295,8 +297,17 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
                 Text("1. 음성 → 텍스트", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
                 WhisperModel.entries.forEach { m ->
-                    ChoiceRow(model == m, "${m.label} · ${m.sizeMb}MB", m.desc) { model = m }
+                    val rec = if (m == ModelManager.recommended(ctx)) " · 이 폰 권장" else ""
+                    ChoiceRow(model == m, "${m.label} · ${m.sizeMb}MB$rec", m.desc) { model = m }
                 }
+                OutlinedTextField(
+                    value = words,
+                    onValueChange = { words = it.take(200) },
+                    label = { Text("자주 나오는 단어 (선택)") },
+                    placeholder = { Text("예: 홍길동, 라이노, 견적서") },
+                    supportingText = { Text("사람 이름·회사명·전문용어를 쉼표로 적으면 더 정확히 알아듣습니다") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
                 Spacer(Modifier.height(12.dp))
                 Text("2. 회의 언어", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
@@ -324,6 +335,7 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
                 ModelManager.select(ctx, model)
                 ModelManager.setAiSummary(ctx, ai)
                 ModelManager.setLang(ctx, lang)
+                ModelManager.setWords(ctx, words)
                 onDone()
             }) { Text(confirmLabel) }
         },

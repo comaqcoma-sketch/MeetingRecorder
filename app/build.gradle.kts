@@ -13,8 +13,8 @@ android {
         applicationId = "com.mplan.meetingrecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4.0"
 
         ndk {
             abiFilters += "arm64-v8a"   // 요즘 휴대폰(64비트) 전용 → 빌드·용량 절약
