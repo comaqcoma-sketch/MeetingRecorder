@@ -62,7 +62,7 @@ object RecordingStore {
 
     fun saveTranscript(context: Context, path: String, segments: List<Segment>) {
         val text = segments.joinToString("\n") {
-            "${it.startMs}\t${it.endMs}\t${it.text.replace('\t', ' ').replace('\n', ' ')}"
+            "${it.startMs}\t${it.endMs}\t${it.text.replace('\t', ' ').replace('\n', ' ')}\t${it.speaker}"
         }
         transcriptFile(path).writeText(text)
     }
@@ -71,10 +71,11 @@ object RecordingStore {
         val f = transcriptFile(path)
         if (!f.exists()) return@withContext emptyList()
         f.readLines().mapNotNull { line ->
-            val p = line.split('\t', limit = 3)
-            if (p.size == 3) Segment(
+            val p = line.split('\t', limit = 4)
+            if (p.size >= 3) Segment(
                 p[0].toLongOrNull() ?: 0L, p[1].toLongOrNull() ?: 0L,
-                p[2].trim().trimStart('-', '–', '—', ' ').trim()   // 이전 버전 텍스트의 "- " 정리
+                p[2].trim().trimStart('-', '–', '—', ' ').trim(),   // 이전 버전 텍스트의 "- " 정리
+                p.getOrNull(3)?.trim()?.toIntOrNull() ?: -1
             ) else null
         }
     }
@@ -91,7 +92,7 @@ object RecordingStore {
             append(summary.trimEnd())
             appendLine(); appendLine()
             appendLine("## 전체 텍스트")
-            segs.forEach { appendLine("[${formatElapsed(it.startMs)}] ${it.text}") }
+            segs.forEach { appendLine("[${formatElapsed(it.startMs)}] ${it.labeled}") }
         }
     }
 

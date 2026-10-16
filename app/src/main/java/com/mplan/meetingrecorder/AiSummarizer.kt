@@ -80,7 +80,8 @@ class AiSummarizer(
 
     /** 결과: (마크다운 본문, 사용한 엔진 이름). 실패 시 null */
     suspend fun summarize(segments: List<Segment>): Pair<String, String>? {
-        val text = segments.joinToString("\n") { it.text.trim() }.trim()
+        // 화자 구분이 있으면 "A: 내용" 형태로 넘겨 누가 말했는지 AI가 알 수 있게 함
+        val text = segments.joinToString("\n") { it.labeled.trim() }.trim()
         // 너무 짧으면 AI가 내용을 지어내기 쉬움 → 기본 요약 사용
         if (text.length < MIN_CHARS) return null
 
@@ -188,6 +189,7 @@ class AiSummarizer(
             - 글에 실제로 나온 내용만 쓴다. 글에 없는 사람 이름, 날짜, 숫자, 결과(예: 성공했다, 정상 작동했다)는 절대 지어내지 않는다.
             - 음성 인식 오타는 문맥상 명확할 때만 바로잡는다.
             - 담당자나 기한이 글에 없으면 쓰지 않는다.
+            - "A:", "B:" 처럼 줄 앞의 글자는 서로 다른 발언자다. 이름이 나오지 않으면 발언자를 A, B로 적는다.
             - 해당 내용이 없으면 "- 없음"이라고만 쓴다."""
 
         private const val SYSTEM =

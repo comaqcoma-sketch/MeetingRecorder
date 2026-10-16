@@ -26,6 +26,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -279,12 +282,14 @@ private fun ChoiceRow(selected: Boolean, title: String, desc: String, onClick: (
     }
 }
 
-/** 변환 모델 + 요약 방식 설정 */
+/** 변환 모델 + 언어 + 화자 구분 + 요약 방식 설정 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var model by remember { mutableStateOf(ModelManager.selected(ctx) ?: ModelManager.recommended(ctx)) }
     var words by remember { mutableStateOf(ModelManager.words(ctx)) }
+    var speakers by remember { mutableIntStateOf(ModelManager.speakers(ctx)) }
     var ai by remember { mutableStateOf(ModelManager.aiSummary(ctx) ?: true) }
     var lang by remember { mutableStateOf(ModelManager.lang(ctx)) }
     val ramGb = remember { Device.totalRamGb(ctx) }
@@ -315,7 +320,23 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
                     ChoiceRow(lang == l, l.label, l.desc) { lang = l }
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("3. 요약 방식", style = MaterialTheme.typography.labelLarge,
+                Text("3. 화자 구분 (A: … B: …)", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "목소리로 말한 사람을 나눕니다. 참석자 수를 알면 고르는 게 더 정확합니다 (최초 1회 ${SpeakerModel.SIZE_MB}MB)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    listOf(-1 to "끔", 0 to "자동", 2 to "2명", 3 to "3명", 4 to "4명", 5 to "5명", 6 to "6명").forEach { (v, l) ->
+                        FilterChip(selected = speakers == v, onClick = { speakers = v }, label = { Text(l) })
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("4. 요약 방식", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
                 ChoiceRow(ai, "AI 요약 (권장)",
                     if (localOk) "지원 폰은 Gemini Nano 사용(추가 다운로드 없음), 그 외 폰은 내장 AI ${LocalLlm.SIZE_MB}MB를 처음 한 번 받음"
@@ -336,6 +357,7 @@ fun SetupDialog(confirmLabel: String, onDone: () -> Unit, onDismiss: () -> Unit)
                 ModelManager.setAiSummary(ctx, ai)
                 ModelManager.setLang(ctx, lang)
                 ModelManager.setWords(ctx, words)
+                ModelManager.setSpeakers(ctx, speakers)
                 onDone()
             }) { Text(confirmLabel) }
         },

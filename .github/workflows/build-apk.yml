@@ -35,6 +35,13 @@ jobs:
           test -n "$TAG"
           echo "LLAMA_TAG=$TAG" >> "$GITHUB_ENV"
 
+      - name: 화자 구분 라이브러리(sherpa-onnx) 받기
+        run: |
+          mkdir -p app/libs
+          curl -fL --retry 3 -o app/libs/sherpa-onnx.aar \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar
+          unzip -l app/libs/sherpa-onnx.aar | grep -E "classes.jar|arm64-v8a" | head
+
       - name: APK 빌드
         run: |
           chmod +x gradlew

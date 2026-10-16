@@ -17,4 +17,8 @@ object WhisperLib {
     external fun resetAbort()
 }
 
-data class Segment(val startMs: Long, val endMs: Long, val text: String)
+/** @param speaker 화자 번호 (0=A, 1=B …, -1=구분 없음) */
+data class Segment(val startMs: Long, val endMs: Long, val text: String, val speaker: Int = -1) {
+    /** "A: 내용" 형태 (화자 구분이 있을 때) */
+    val labeled get() = if (speaker >= 0) "${SpeakerDiarizer.letter(speaker)}: $text" else text
+}

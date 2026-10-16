@@ -36,12 +36,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** 화자별 구분 색 (밝은·어두운 화면 모두 잘 보이는 색) */
+private val speakerColors = listOf(
+    Color(0xFF3B82F6), Color(0xFFF59E0B), Color(0xFF10B981), Color(0xFFEC4899),
+    Color(0xFF8B5CF6), Color(0xFFEF4444), Color(0xFF14B8A6), Color(0xFF84CC16)
+)
+
+private fun speakerColor(i: Int) = speakerColors[i % speakerColors.size]
 
 private val timeRegex = Regex("""\[(?:(\d+):)?(\d{1,2}):(\d{2})]""")
 
@@ -149,7 +158,10 @@ fun DetailScreen(rec: Recording, onBack: () -> Unit) {
             }
             TabRow(selectedTabIndex = tab) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("요약") })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("전체 텍스트 (${segments.size})") })
+                val spk = segments.map { it.speaker }.filter { it >= 0 }.distinct().size
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = {
+                    Text(if (spk >= 2) "전체 텍스트 · ${spk}명" else "전체 텍스트 (${segments.size})")
+                })
             }
             if (tab == 0) SummaryView(summary, onTime = { playAt(it) })
             else TranscriptView(segments, if (playing) pos.toLong() else -1L, onTap = { playAt(it) })
@@ -232,6 +244,15 @@ private fun TranscriptView(segments: List<Segment>, posMs: Long, onTap: (Long) -
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.width(64.dp).padding(top = 2.dp)
                 )
+                if (s.speaker >= 0) {
+                    Text(
+                        SpeakerDiarizer.letter(s.speaker) + ":",
+                        color = speakerColor(s.speaker),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(28.dp)
+                    )
+                }
                 Text(
                     s.text,
                     style = MaterialTheme.typography.bodyMedium,

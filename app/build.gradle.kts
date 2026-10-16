@@ -13,8 +13,8 @@ android {
         applicationId = "com.mplan.meetingrecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.5.0"
 
         ndk {
             abiFilters += "arm64-v8a"   // 요즘 휴대폰(64비트) 전용 → 빌드·용량 절약
@@ -63,6 +63,9 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
     }
+    packaging {
+        jniLibs { pickFirsts += "**/libc++_shared.so" }
+    }
     buildFeatures {
         compose = true
     }
@@ -85,6 +88,9 @@ dependencies {
     // AI 요약: 내장 소형 AI(llama.cpp) + 지원 폰의 Gemini Nano
     implementation(project(":llm"))
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
+
+    // 화자 구분: sherpa-onnx (CI가 공식 릴리스에서 app/libs 로 내려받음)
+    implementation(files("libs/sherpa-onnx.aar"))
 }
 
 kotlin {

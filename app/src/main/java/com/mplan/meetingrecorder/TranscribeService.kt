@@ -149,6 +149,17 @@ class TranscribeService : Service() {
                 }
                 if (cancelled) throw InterruptedException()
 
+                // 1-2) 화자 구분 모델 (켜져 있을 때만, 최초 1회 27MB). 실패해도 변환은 계속
+                val spkSetting = ModelManager.speakers(this)
+                if (spkSetting >= 0 && !ModelManager.isSpeakerDownloaded(this)) {
+                    val label = "화자 구분 모델 다운로드 (최초 1회, ${SpeakerModel.SIZE_MB}MB)"
+                    setPhase(label, 0)
+                    try {
+                        ModelManager.downloadSpeaker(this, { p -> setPhase(label, p) }, { cancelled })
+                    } catch (e: InterruptedException) { throw e } catch (_: Throwable) { }
+                }
+                if (cancelled) throw InterruptedException()
+
                 // 2) 모델 불러오기
                 setPhase("변환 엔진 준비 중", 0)
                 ctxPtr = WhisperLib.initContext(ModelManager.file(this, model).absolutePath)
@@ -163,6 +174,10 @@ class TranscribeService : Service() {
                 val lang = ModelManager.lang(this).code
                 val hint = ModelManager.speechPrompt(this).toByteArray(Charsets.UTF_8)
                 val list = ArrayList<Segment>()
+                val embs = ArrayList<FloatArray?>()   // 문장별 목소리 특징
+                val diarizer = if (spkSetting >= 0 && ModelManager.isSpeakerDownloaded(this)) {
+                    try { SpeakerDiarizer(ModelManager.speakerFile(this).absolutePath, 2) } catch (_: Throwable) { null }
+                } else null
                 chunkStart = 0L
                 chunkLen = 0L
                 val poller = scope.launch {
@@ -186,10 +201,14 @@ class TranscribeService : Service() {
                             if (parts.size == 3) {
                                 val text = cleanText(parts[2])
                                 if (text.isNotEmpty() && list.lastOrNull()?.text != text) {
-                                    list += Segment(
-                                        startMs + (parts[0].toLongOrNull() ?: 0L),
-                                        startMs + (parts[1].toLongOrNull() ?: 0L),
-                                        text
+                                    val t0 = parts[0].toLongOrNull() ?: 0L
+                                    val t1 = parts[1].toLongOrNull() ?: 0L
+                                    list += Segment(startMs + t0, startMs + t1, text)
+                                    // 이 문장 구간의 목소리 특징 (오디오가 메모리에 있을 때 바로 계산)
+                                    embs += diarizer?.embed(
+                                        samples,
+                                        (t0 * AudioDecoder.TARGET_RATE / 1000).toInt(),
+                                        (t1 * AudioDecoder.TARGET_RATE / 1000).toInt()
                                     )
                                 }
                             }
@@ -198,13 +217,24 @@ class TranscribeService : Service() {
                     }
                 } finally {
                     poller.cancel()
+                    diarizer?.release()
                 }
                 if (cancelled) throw InterruptedException()
                 // 변환 엔진은 바로 해제 → AI 요약에 메모리 양보
                 WhisperLib.freeContext(ctxPtr)
                 ctxPtr = 0L
-                RecordingStore.saveTranscript(this, path, list)
-                segments = list
+
+                // 화자 구분: 비슷한 목소리끼리 묶어 A, B, C…
+                var result: List<Segment> = list
+                if (diarizer != null && embs.size == list.size) {
+                    setPhase("화자 구분 중", 99)
+                    val labels = try {
+                        SpeakerDiarizer.cluster(embs, list.map { it.endMs - it.startMs }, spkSetting)
+                    } catch (_: Throwable) { null }
+                    if (labels != null) result = list.mapIndexed { i, sg -> sg.copy(speaker = labels[i]) }
+                }
+                RecordingStore.saveTranscript(this, path, result)
+                segments = result
             }
 
             // 4) 요약: AI(Gemini Nano → 내장 AI) → 실패하면 기본(규칙) 요약

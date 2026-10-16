@@ -51,6 +51,24 @@ object ModelManager {
     private const val KEY_AI = "ai_summary"
     private const val KEY_LANG = "lang"
     private const val KEY_WORDS = "words"
+    private const val KEY_SPK = "speakers"
+
+    /** 화자 구분: -1=끔, 0=자동, 2 이상=참석자 수 */
+    fun speakers(ctx: Context): Int =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_SPK, 0)
+
+    fun setSpeakers(ctx: Context, n: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_SPK, n).apply()
+        if (n < 0) speakerFile(ctx).delete()
+    }
+
+    fun speakerFile(ctx: Context) = File(dir(ctx), SpeakerModel.FILE)
+    fun isSpeakerDownloaded(ctx: Context) = speakerFile(ctx).let { it.exists() && it.length() > 1_000_000 }
+
+    fun downloadSpeaker(ctx: Context, onProgress: (Int) -> Unit, isCancelled: () -> Boolean) {
+        checkSpace(ctx, SpeakerModel.SIZE_MB)
+        downloadUrl(SpeakerModel.URL, speakerFile(ctx), SpeakerModel.SIZE_MB, onProgress, isCancelled)
+    }
 
     /** 폰 사양에 맞는 기본 변환 모델 */
     fun recommended(ctx: Context) = if (Device.canRunLocalLlm(ctx)) WhisperModel.TURBO else WhisperModel.SMALL
