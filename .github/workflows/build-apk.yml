@@ -44,7 +44,7 @@ jobs:
       - name: 오류 요약 표시
         if: failure()
         run: |
-          grep -E "^e: |error:|What went wrong|FAILED|CMake Error|undefined reference|> " build.log | head -60 > err.txt || true
+          grep -E "^e: |error:|What went wrong|FAILED|CMake Error|undefined reference|^> [^T]|^  " build.log | grep -v "^> Task" | head -80 > err.txt || true
           python3 - <<'PY'
           lines = open("err.txt", encoding="utf-8", errors="replace").read().splitlines()
           for i in range(0, len(lines), 12):
